@@ -1,0 +1,2173 @@
+--[[
+-- NOTE, does not work on low resolutions if Window "AutoScale" is enabled
+-- stylua formatter used
+
+-- TODO
+--- Colorpicker
+--- Keybinds
+
+-- (Scroll down for example)
+
+UI:Window({ Title: string, Size: Vector2, Keybind: string, AutoScale: bool })
+Window:Initialize() -- ALWAYS call this at the end of your code
+
+Window:Tab({ Title: string })
+
+Tab:Section({ Title: string, Side: 'Left' | 'Right' })
+
+Section:Button({ Title: string }, function () )
+
+Section:Checkbox({ Title: string, Default: bool }, function (bool) )
+Checkbox:Get() -> bool
+Checkbox:Set(bool)
+
+Section:TextBox({ Title: string, MaxCharacters: number, Placeholder: string }, function (string))
+TextBox:Get() -> string
+
+Section:Slider({ Title:string, Suffix: string, Min: number, Max: number, Step: number, Default: number }, function(number))
+Slider:Get() -> number
+Slider:Set(number)
+
+Section:RangeSlider({ Title: string, Suffix: string, Min: number, Max: number, Step: number, DefaultLow: number, DefaultHigh: number }, function(numberLow, numberHigh))
+RangeSlider:GetLow() -> number
+RangeSlider:GetHigh() -> number
+RangeSlider:SetLow(number)
+RangeSlider:SetHigh(number)
+
+Section:Selection({ Title: string, Options: { string }, Default: string, function (string))
+Selection:Get() -> string
+
+Section:MultiSelection({ Title: string, Options: { string }, Default: { string }, function ({ string }))
+MultiSelection:Get() -> { string }
+
+Example usage:
+
+local UI = require("workspace/UI.lua") -- I recommend doing something like this
+
+local Window = UI:Window({Title = "Window Title", Size = Vector2.new(800, 600), Keybind = "F1", AutoScale = true})
+
+local Tab1 = Window:Tab({Title = "Tab 1"})
+local Tab2 = Window:Tab({Title = "Tab 2"})
+
+local Tab1Section1 = Tab1:Section({Title = "Section1", Side = "Left"})
+local Tab1Section2 = Tab1:Section({Title = "Section2", Side = "Right"})
+local Tab1Section3 = Tab1:Section({Title = "Section3", Side = "Right"})
+
+local Tab2Section1 = Tab2:Section({Title = "Section1", Side = "Left"})
+for i = 1, 10 do
+	Tab2Section1:Button({ Title = "Button " .. i }, function()
+		print("Pressed Button", i)
+	end)
+end
+
+Tab1Section1:Seperator({Title = "Optional"})
+Tab1Section2:Seperator({Title = ""})
+
+local UnloadButton = Tab1Section1:Button({Title = "Unload"}, function()
+    Window:Unload()
+end)
+
+Tab1Section1:Seperator({Title = "Seperator"})
+
+local Button = Tab1Section1:Button({Title = "Button"}, function()
+    print("Pressed")
+end)
+
+local Checkbox = Tab1Section1:Checkbox({Title = "Checkbox", Default = false}, function(Value)
+    print(Value)
+end)
+
+local Checkbox = Tab1Section1:Checkbox({Title = "True Checkbox", Default = true}, function(Value)
+    print(Value)
+end)
+
+local TextBox = Tab1Section1:TextBox({Title = "TextBox", MaxCharacters = 20, Placeholder = "A placeholder"}, function(Text)
+    print(Text)
+end)
+
+local Slider = Tab1Section1:Slider({Title = "Slider", Suffix = '', Min = 0, Max = 100, Step = 0.5, Default = 50}, function(Value)
+    print(Value)
+end)
+
+local Slider = Tab1Section1:Slider({Title = "% Slider", Suffix = '%', Min = 0, Max = 100, Step = 1, Default = 0}, function(Value)
+    print(Value)
+end)
+
+local RangeSlider = Tab1Section2:RangeSlider({Title = "Range Slider", Suffix = '', Min = 0, Max = 100, Step = 0.5, DefaultLow = 5, DefaultHigh = 50}, function(Low, High)
+    print(Low, High)
+end)
+
+local RangeSlider = Tab1Section2:RangeSlider({Title = "px Range Slider", Suffix = 'px', Min = -500, Max = 500, Step = 50, DefaultLow = 0, DefaultHigh = 0}, function(Low, High)
+    print(Low, High)
+end)
+
+local Selection = Tab1Section3:Selection({Title = "Selection", Options = {'a', 'b', 'c'}, Default = 'a'}, function(Selected) 
+    print(Selected)
+end)
+
+local MultiSelection = Tab1Section3:MultiSelection({Title = "Multi Selection", Options = {'a', 'b', 'c', 'x', 'y', 'z'}, Default = {'a', 'b'}}, function(Selected) 
+    for _, selected in Selected do
+		print(selected)
+	end
+end)
+
+Window:Initialize() -- ALWAYS call at the end
+]]
+
+local Connection = {}
+Connection.__index = Connection
+function Connection.new(signal, fn)
+	return setmetatable({
+		_connected = true,
+		_signal = signal,
+		_fn = fn,
+		_next = false,
+	}, Connection)
+end
+function Connection:Disconnect()
+	self._connected = false
+	if self._signal._handlerListHead == self then
+		self._signal._handlerListHead = self._next
+	else
+		local prev = self._signal._handlerListHead
+		while prev and prev._next ~= self do
+			prev = prev._next
+		end
+		if prev then
+			prev._next = self._next
+		end
+	end
+end
+local Signal = {}
+Signal.__index = Signal
+function Signal.new()
+	return setmetatable({
+		_handlerListHead = false,
+	}, Signal)
+end
+function Signal:Connect(fn)
+	local connection = Connection.new(self, fn)
+	if self._handlerListHead then
+		connection._next = self._handlerListHead
+		self._handlerListHead = connection
+	else
+		self._handlerListHead = connection
+	end
+	return connection
+end
+function Signal:DisconnectAll()
+	self._handlerListHead = false
+end
+function Signal:Fire(...)
+	local item = self._handlerListHead
+	while item do
+		if item._connected then
+			local ok, err = pcall(item._fn, ...)
+			if not ok then
+				print("error in signalS")
+				error(err)
+			end
+		end
+		item = item._next
+	end
+end
+function Signal:Once(fn)
+	local cn
+	cn = self:Connect(function(...)
+		if cn._connected then
+			cn:Disconnect()
+		end
+		fn(...)
+	end)
+	return cn
+end
+
+local UI = {}
+UI.__index = UI
+
+local Window = {}
+Window.__index = Window
+
+local Tab = {}
+Tab.__index = Tab
+
+local Section = {}
+Section.__index = Section
+
+local Seperator = {}
+Seperator.__index = Seperator
+
+local Button = {}
+Button.__index = Button
+
+local Checkbox = {}
+Checkbox.__index = Checkbox
+
+local TextBox = {}
+TextBox.__index = TextBox
+
+local Slider = {}
+Slider.__index = Slider
+
+local RangeSlider = {}
+RangeSlider.__index = RangeSlider
+
+local Selection = {}
+Selection.__index = Selection
+
+local MultiSelection = {}
+MultiSelection.__index = MultiSelection
+
+local Colorpicker = {}
+Colorpicker.__index = Colorpicker
+
+local WidgetType = {
+	Seperator = 1,
+	Button = 2,
+	Checkbox = 3,
+	TextBox = 4,
+	Slider = 5,
+	RangeSlider = 6,
+	Selection = 7,
+	MultiSelection = 8,
+	Colorpicker = 9,
+}
+
+local Workspace = game:GetService("Workspace")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+
+local Utility = {}
+
+function Utility.GetTextBounds(str)
+	return Vector2.new(#str * 7, 7) -- 7 is the only font size in matcha text drawing
+end
+
+function Utility.IsHoveredOver(drawing, ignoreList)
+	if not drawing.Visible then
+		return false
+	end
+	local mx, my = Mouse.X, Mouse.Y
+	local position = drawing.Position
+	local size = drawing.Size
+
+	if mx < position.X or mx > position.X + size.X or my < position.Y or my > position.Y + size.Y then
+		return false
+	end
+
+	if not ignoreList then
+		return true
+	end
+
+	for _, drawing in pairs(ignoreList) do
+		if
+			mx >= drawing.Position.X
+			and mx <= drawing.Position.X + drawing.Size.X
+			and my >= drawing.Position.Y
+			and my <= drawing.Position.Y + drawing.Size.Y
+		then
+			return false
+		end
+	end
+
+	return true
+end
+
+function Utility.GetAllSelectionDrawings(widget)
+	local drawings = {}
+	for _, _widget in widget.Section.var.widgets do
+		if
+			(_widget.WidgetType == WidgetType.Selection or _widget.WidgetType == WidgetType.MultiSelection)
+			and _widget ~= widget
+		then
+			for _, selectionDrawings in _widget.var.SelectionDrawings do
+				for _, selectionDrawing in selectionDrawings do
+					if not selectionDrawing.Visible then
+						continue
+					end
+					table.insert(drawings, selectionDrawing)
+				end
+			end
+		elseif widget.WidgetType == WidgetType.Colorpicker and _widget ~= widget then
+			table.insert(drawings, widget.var.drawings.ColorpickerBackground)
+		end
+	end
+	return drawings
+end
+
+function Utility.ShowDrawings(tbl, show)
+	for _, drawing in tbl do
+		if drawing.Visible == show then
+			continue
+		end
+		drawing.Visible = show
+	end
+end
+
+function Utility.RemoveDrawings(tbl)
+	for _, drawing in tbl do
+		drawing:Remove()
+	end
+end
+
+function UI:Window(Options)
+	local self = setmetatable({}, Window)
+	if not Options then
+		Options = {}
+	end
+
+	self.input = {
+		["LMB"] = { code = 0x1, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["RMB"] = { code = 0x2, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["MMB"] = { code = 0x4, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["MB4"] = { code = 0x5, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["MB5"] = { code = 0x6, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+
+		["0"] = { code = 0x30, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["1"] = { code = 0x31, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["2"] = { code = 0x32, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["3"] = { code = 0x33, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["4"] = { code = 0x34, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["5"] = { code = 0x35, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["6"] = { code = 0x36, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["7"] = { code = 0x37, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["8"] = { code = 0x38, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["9"] = { code = 0x39, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+
+		["A"] = { code = 0x41, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["B"] = { code = 0x42, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["C"] = { code = 0x43, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["D"] = { code = 0x44, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["E"] = { code = 0x45, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["F"] = { code = 0x46, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["G"] = { code = 0x47, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["H"] = { code = 0x48, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["I"] = { code = 0x49, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["J"] = { code = 0x4A, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["K"] = { code = 0x4B, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["L"] = { code = 0x4C, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["M"] = { code = 0x4D, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["N"] = { code = 0x4E, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["O"] = { code = 0x4F, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["P"] = { code = 0x50, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["Q"] = { code = 0x51, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["R"] = { code = 0x52, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["S"] = { code = 0x53, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["T"] = { code = 0x54, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["U"] = { code = 0x55, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["V"] = { code = 0x56, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["W"] = { code = 0x57, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["X"] = { code = 0x58, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["Y"] = { code = 0x59, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["Z"] = { code = 0x5A, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+
+		["F1"] = { code = 0x70, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["F2"] = { code = 0x71, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["F3"] = { code = 0x72, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["F4"] = { code = 0x73, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["F5"] = { code = 0x74, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["F6"] = { code = 0x75, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["F7"] = { code = 0x76, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["F8"] = { code = 0x77, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["F9"] = { code = 0x78, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["F10"] = { code = 0x79, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["F11"] = { code = 0x7A, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["F12"] = { code = 0x7B, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+
+		["ESC"] = { code = 0x1B, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["TAB"] = { code = 0x09, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["CAPSLOCK"] = {
+			code = 0x14,
+			held = false,
+			click = false,
+			holdevent = nil,
+			keydownevent = nil,
+			keyupevent = nil,
+		},
+		["SHIFT"] = { code = 0x10, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["CTRL"] = { code = 0x11, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["ALT"] = { code = 0x12, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["LWIN"] = { code = 0x5B, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["RWIN"] = { code = 0x5C, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["ENTER"] = { code = 0x0D, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["BACKSPACE"] = {
+			code = 0x08,
+			held = false,
+			click = false,
+			holdevent = nil,
+			keydownevent = nil,
+			keyupevent = nil,
+		},
+		["SPACE"] = { code = 0x20, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+
+		["INSERT"] = { code = 0x2D, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["DELETE"] = { code = 0x2E, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["HOME"] = { code = 0x24, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["END"] = { code = 0x23, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["PAGEUP"] = { code = 0x21, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["PAGEDOWN"] = {
+			code = 0x22,
+			held = false,
+			click = false,
+			holdevent = nil,
+			keydownevent = nil,
+			keyupevent = nil,
+		},
+
+		["LEFT"] = { code = 0x25, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["UP"] = { code = 0x26, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["RIGHT"] = { code = 0x27, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["DOWN"] = { code = 0x28, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+
+		["NUM0"] = { code = 0x60, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["NUM1"] = { code = 0x61, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["NUM2"] = { code = 0x62, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["NUM3"] = { code = 0x63, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["NUM4"] = { code = 0x64, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["NUM5"] = { code = 0x65, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["NUM6"] = { code = 0x66, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["NUM7"] = { code = 0x67, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["NUM8"] = { code = 0x68, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["NUM9"] = { code = 0x69, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["NUM*"] = { code = 0x6A, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["NUM+"] = { code = 0x6B, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["NUM-"] = { code = 0x6D, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["NUM."] = { code = 0x6E, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+		["NUM/"] = { code = 0x6F, held = false, click = false, holdevent = nil, keydownevent = nil, keyupevent = nil },
+
+		["OEM_0xBA"] = {
+			code = 0xBA,
+			held = false,
+			click = false,
+			holdevent = nil,
+			keydownevent = nil,
+			keyupevent = nil,
+		},
+		["OEM_0xBB"] = {
+			code = 0xBB,
+			held = false,
+			click = false,
+			holdevent = nil,
+			keydownevent = nil,
+			keyupevent = nil,
+		},
+		["OEM_0xBC"] = {
+			code = 0xBC,
+			held = false,
+			click = false,
+			holdevent = nil,
+			keydownevent = nil,
+			keyupevent = nil,
+		},
+		["OEM_0xBD"] = {
+			code = 0xBD,
+			held = false,
+			click = false,
+			holdevent = nil,
+			keydownevent = nil,
+			keyupevent = nil,
+		},
+		["OEM_0xBE"] = {
+			code = 0xBE,
+			held = false,
+			click = false,
+			holdevent = nil,
+			keydownevent = nil,
+			keyupevent = nil,
+		},
+		["OEM_0xBF"] = {
+			code = 0xBF,
+			held = false,
+			click = false,
+			holdevent = nil,
+			keydownevent = nil,
+			keyupevent = nil,
+		},
+		["OEM_0xC0"] = {
+			code = 0xC0,
+			held = false,
+			click = false,
+			holdevent = nil,
+			keydownevent = nil,
+			keyupevent = nil,
+		},
+		["OEM_0xDB"] = {
+			code = 0xDB,
+			held = false,
+			click = false,
+			holdevent = nil,
+			keydownevent = nil,
+			keyupevent = nil,
+		},
+		["OEM_0xDC"] = {
+			code = 0xDC,
+			held = false,
+			click = false,
+			holdevent = nil,
+			keydownevent = nil,
+			keyupevent = nil,
+		},
+		["OEM_0xDD"] = {
+			code = 0xDD,
+			held = false,
+			click = false,
+			holdevent = nil,
+			keydownevent = nil,
+			keyupevent = nil,
+		},
+		["OEM_0xDE"] = {
+			code = 0xDE,
+			held = false,
+			click = false,
+			holdevent = nil,
+			keydownevent = nil,
+			keyupevent = nil,
+		},
+	}
+
+	for _, key in self.input do
+		key.holdevent = Signal.new()
+		key.keydownevent = Signal.new()
+		key.keyupevent = Signal.new()
+	end
+
+	self.window = {}
+	self.window.Title = Options["Title"] or "No title provided"
+	self.window.Size = Options["Size"] or Vector2.new(400, 600)
+	self.window.Keybind = Options["Keybind"] or "F1"
+	self.window.AutoScale = Options["AutoScale"] ~= nil and Options["AutoScale"] or true
+
+	self.theme = {
+		Menu = {
+			cBackground = Color3.fromRGB(30, 30, 35),
+			cBorder = Color3.fromRGB(45, 45, 50),
+			cDragBorder = Color3.fromRGB(88, 101, 242),
+		},
+		Tab = {
+			cTabSelectedBackground = Color3.fromRGB(38, 38, 45),
+			cTabUnselectedBackground = Color3.fromRGB(33, 33, 38),
+			cTabBorder = Color3.fromRGB(45, 45, 50),
+			cTabBorderSelected = Color3.fromRGB(88, 101, 242),
+			Offset = 5,
+		},
+		Section = {
+			cSectionBackground = Color3.fromRGB(34, 34, 40),
+			cSectionBorder = Color3.fromRGB(60, 60, 65),
+			Offset = 12.5,
+		},
+		Text = {
+			cText = Color3.fromRGB(235, 235, 240),
+			cTextPlaceholder = Color3.fromRGB(150, 150, 160),
+		},
+		Widgets = {
+			Seperator = {
+				cLine = Color3.fromRGB(88, 101, 242),
+			},
+			Button = {
+				cButtonBackground = Color3.fromRGB(50, 50, 60),
+				cButtonBorder = Color3.fromRGB(45, 45, 50),
+				cButtonBorderHover = Color3.fromRGB(88, 101, 242),
+			},
+			Checkbox = {
+				cCheckboxChecked = Color3.fromRGB(88, 101, 242),
+				cCheckboxUnchecked = Color3.fromRGB(50, 50, 60),
+				cCheckboxBorder = Color3.fromRGB(45, 45, 50),
+				cCheckboxBorderHover = Color3.fromRGB(88, 101, 242),
+			},
+			TextBox = {
+				cTextBoxBackground = Color3.fromRGB(60, 60, 70),
+				cTextBoxBorder = Color3.fromRGB(45, 45, 50),
+			},
+			Slider = {
+				cSliderBackground = Color3.fromRGB(50, 50, 60),
+				cSliderBackgroundActive = Color3.fromRGB(88, 101, 242),
+				cSliderBorder = Color3.fromRGB(45, 45, 50),
+			},
+			RangeSlider = {
+				cRangeSliderBackground = Color3.fromRGB(50, 50, 60),
+				cRangeSliderBackgroundActiveLow = Color3.fromRGB(88, 101, 242),
+				cRangeSliderBackgroundActiveHigh = Color3.fromRGB(70, 60, 160),
+				cRangeSliderBorder = Color3.fromRGB(45, 45, 50),
+			},
+			Selection = {
+				cSelectionBackground = Color3.fromRGB(50, 50, 60),
+				cSelectionBorder = Color3.fromRGB(45, 45, 50),
+				cSelection = Color3.fromRGB(70, 70, 80),
+				cSelectionSelected = Color3.fromRGB(40, 40, 50),
+			},
+			MultiSelection = {
+				cMultiSelectionBackground = Color3.fromRGB(50, 50, 60),
+				cMultiSelectionBorder = Color3.fromRGB(45, 45, 50),
+				cMultiSelection = Color3.fromRGB(70, 70, 80),
+				cMultiSelectionSelected = Color3.fromRGB(40, 40, 50),
+			},
+			Colorpicker = {
+				cColorpickerBackground = Color3.fromRGB(45, 45, 50),
+				cColorpickerBorder = Color3.fromRGB(45, 45, 50),
+			},
+		},
+	}
+
+	self.activetab = nil
+	self.open = true
+	self.writing = false
+	self.dragging = false
+	self.dragoffset = nil
+	self.initialized = false
+
+	local Background = Drawing.new("Square")
+	Background.Filled = true
+	Background.Color = self.theme.Menu.cBackground
+	Background.ZIndex = -25
+
+	local Border = Drawing.new("Square")
+	Border.Filled = false
+	Border.Color = self.theme.Menu.cBorder
+	Border.ZIndex = -24
+
+	local TopBar = Drawing.new("Square")
+	TopBar.Filled = true
+	TopBar.Color = self.theme.Menu.cBackground
+	TopBar.ZIndex = -23
+
+	local Title = Drawing.new("Text")
+	Title.Text = self.window.Title
+	Title.Outline = true
+	Title.Color = self.theme.Text.cText
+	Title.ZIndex = -22
+
+	local DragBorder = Drawing.new("Square")
+	DragBorder.Visible = false
+	DragBorder.Filled = false
+	DragBorder.Color = self.theme.Menu.cDragBorder
+	DragBorder.ZIndex = -1
+
+	local dragStartOffset = Vector2.new(0, 0)
+	self.input.LMB["keydownevent"]:Connect(function()
+		if self.open and Utility.IsHoveredOver(TopBar) and not self.dragging then
+			self.dragging = true
+			dragStartOffset = Background.Position - Vector2.new(Mouse.X, Mouse.Y)
+			DragBorder.Visible = true
+		end
+	end)
+
+	self.input.LMB["keyupevent"]:Connect(function()
+		if not self.dragging then
+			return
+		end
+		self.dragoffset = DragBorder.Position
+		self.dragging = false
+		DragBorder.Visible = false
+	end)
+
+	self.input.LMB["holdevent"]:Connect(function()
+		DragBorder.Size = Border.Size
+		if not self.dragging then
+			DragBorder.Position = Border.Position
+			return
+		end
+		local ViewportSize = game:GetService("Workspace").CurrentCamera.ViewportSize
+		DragBorder.Position = Vector2.new(
+			math.clamp(Mouse.X + dragStartOffset.X, 0, ViewportSize.X - DragBorder.Size.X),
+			math.clamp(Mouse.Y + dragStartOffset.Y, 0, ViewportSize.Y - DragBorder.Size.Y)
+		)
+	end)
+
+	self.input[self.window.Keybind]["keydownevent"]:Connect(function()
+		self.open = not self.open
+		setrobloxinput(not self.open)
+	end)
+
+	self.window.var = {
+		tabs = {},
+		drawings = {
+			Background = Background,
+			Border = Border,
+			TopBar = TopBar,
+			Title = Title,
+		},
+	}
+
+	return self
+end
+
+function Window:Tab(Options)
+	if not Options then
+		Options = {}
+	end
+
+	local Tab = setmetatable({}, Tab)
+	Tab.Window = self
+
+	Tab.Title = Options["Title"] or "No title"
+
+	local TabBackground = Drawing.new("Square")
+	TabBackground.Filled = true
+	TabBackground.Color = Tab.Window.theme.Tab.cTabUnselectedBackground
+	TabBackground.ZIndex = -21
+
+	local Border = Drawing.new("Square")
+	Border.Filled = false
+	Border.Color = Tab.Window.theme.Tab.cTabBorder
+	Border.ZIndex = -20
+
+	local Title = Drawing.new("Text")
+	Title.Text = Tab.Title
+	Title.Outline = true
+	Title.Color = Tab.Window.theme.Text.cText
+	Title.ZIndex = -19
+
+	Tab.Window.input.LMB["keydownevent"]:Connect(function()
+		if Tab.Window.open and Utility.IsHoveredOver(TabBackground) then
+			Tab.Window.activetab = Tab
+		end
+	end)
+
+	Tab.var = {
+		sections = {},
+		drawings = {
+			TabBackground = TabBackground,
+			Border = Border,
+			Title = Title,
+		},
+	}
+
+	if not Tab.Window.activetab then
+		Tab.Window.activetab = Tab
+	end
+
+	table.insert(Tab.Window.window.var.tabs, Tab)
+	return Tab
+end
+
+function Tab:Section(Options)
+	if not Options then
+		Options = {}
+	end
+
+	local Section = setmetatable({}, Section)
+	Section.Tab = self
+	Section.Window = self.Window
+
+	local isSideValid = Options["Side"] == "Left" or Options["Side"] == "Right"
+
+	Section.Title = Options["Title"] or "No title"
+	Section.Side = isSideValid and Options["Side"] or "Left"
+
+	local SectionBackground = Drawing.new("Square")
+	SectionBackground.Filled = true
+	SectionBackground.Color = Section.Window.theme.Section.cSectionBackground
+	SectionBackground.ZIndex = -17
+
+	local Border = Drawing.new("Square")
+	Border.Filled = false
+	Border.Color = Section.Window.theme.Section.cSectionBorder
+	Border.ZIndex = -16
+
+	local Title = Drawing.new("Text")
+	Title.Text = Section.Title
+	Title.Outline = true
+	Title.Color = Section.Window.theme.Text.cText
+	Title.ZIndex = -15
+
+	Section.var = {
+		widgets = {},
+		drawings = {
+			SectionBackground = SectionBackground,
+			Border = Border,
+			Title = Title,
+		},
+	}
+
+	table.insert(Section.Tab.var.sections, Section)
+	return Section
+end
+
+function Section:Seperator(Options)
+	if not Options then
+		Options = {}
+	end
+
+	local Seperator = setmetatable({}, Seperator)
+	Seperator.Section = self
+	Seperator.WidgetType = WidgetType.Seperator
+
+	Seperator.Title = Options["Title"] or ""
+
+	local Line = Drawing.new("Square")
+	Line.Filled = true
+	Line.Color = Seperator.Section.Window.theme.Widgets.Seperator.cLine
+	Line.ZIndex = -14
+
+	local Title = Drawing.new("Text")
+	Title.Text = Seperator.Title
+	Title.Outline = true
+	Title.Color = Seperator.Section.Window.theme.Text.cText
+	Title.ZIndex = -13
+
+	Seperator.var = {
+		drawings = {
+			Line = Line,
+			Title = Title,
+		},
+	}
+
+	table.insert(Seperator.Section.var.widgets, Seperator)
+	return Seperator
+end
+
+function Section:Button(Options, Callback)
+	if not Options then
+		Options = {}
+	end
+
+	local Button = setmetatable({}, Button)
+	Button.Section = self
+	Button.WidgetType = WidgetType.Button
+
+	Button.Title = Options["Title"] or "No title"
+	Button.Callback = Callback or function() end
+
+	local ButtonBackground = Drawing.new("Square")
+	ButtonBackground.Filled = true
+	ButtonBackground.Color = Button.Section.Window.theme.Widgets.Button.cButtonBackground
+	ButtonBackground.ZIndex = -14
+
+	local Border = Drawing.new("Square")
+	Border.Filled = false
+	Border.Color = Button.Section.Window.theme.Widgets.Button.cButtonBorder
+	Border.ZIndex = -13
+
+	local Title = Drawing.new("Text")
+	Title.Text = Button.Title
+	Title.Outline = true
+	Title.Color = Button.Section.Window.theme.Text.cText
+	Title.ZIndex = -12
+
+	Button.Section.Window.input.LMB["keydownevent"]:Connect(function()
+		if
+			Button.Section.Window.open
+			and Utility.IsHoveredOver(ButtonBackground, Utility.GetAllSelectionDrawings(Button))
+		then
+			Button.Callback()
+		end
+	end)
+
+	Button.var = {
+		drawings = {
+			ButtonBackground = ButtonBackground,
+			Border = Border,
+			Title = Title,
+		},
+	}
+
+	table.insert(Button.Section.var.widgets, Button)
+	return Button
+end
+
+function Section:Checkbox(Options, Callback)
+	if not Options then
+		Options = {}
+	end
+
+	local Checkbox = setmetatable({}, Checkbox)
+	Checkbox.Section = self
+	Checkbox.WidgetType = WidgetType.Checkbox
+
+	Checkbox.Title = Options["Title"] or "No title"
+	Checkbox.Enabled = Options["Default"] ~= nil and Options["Default"] or false
+	Checkbox.Callback = Callback or function(Value) end
+
+	local CheckboxBackground = Drawing.new("Square")
+	CheckboxBackground.Filled = true
+	CheckboxBackground.Color = Checkbox.Section.Window.theme.Widgets.Checkbox.cCheckboxUnchecked
+	CheckboxBackground.ZIndex = -14
+
+	local Border = Drawing.new("Square")
+	Border.Filled = false
+	Border.Color = Checkbox.Section.Window.theme.Widgets.Checkbox.cCheckboxBorder
+	Border.ZIndex = -13
+
+	local Title = Drawing.new("Text")
+	Title.Text = Checkbox.Title
+	Title.Outline = true
+	Title.Color = Checkbox.Section.Window.theme.Text.cText
+	Title.ZIndex = -12
+
+	local KeybindText = Drawing.new("Text")
+	KeybindText.Text = ""
+	KeybindText.Outline = true
+	KeybindText.Color = Checkbox.Section.Window.theme.Text.cText
+	KeybindText.ZIndex = -11
+
+	Checkbox.Section.Window.input.LMB["keydownevent"]:Connect(function()
+		if
+			Checkbox.Section.Window.open
+			and Utility.IsHoveredOver(CheckboxBackground, Utility.GetAllSelectionDrawings(Checkbox))
+		then
+			Checkbox.Enabled = not Checkbox.Enabled
+			Checkbox.Callback(Checkbox.Enabled)
+		end
+	end)
+
+	Checkbox.var = {
+		drawings = {
+			CheckboxBackground = CheckboxBackground,
+			Border = Border,
+			Title = Title,
+			KeybindText = KeybindText,
+		},
+	}
+
+	table.insert(Checkbox.Section.var.widgets, Checkbox)
+	return Checkbox
+end
+function Checkbox:Get()
+	return self.Enabled
+end
+function Checkbox:Set(Value)
+	self.Enabled = Value or self.Enabled
+end
+--[[function Checkbox:AddKeybind(Options)
+	self.Key = Options["Key"] or self.Key or "Q"
+	self.var.drawings.KeybindText.Text = "[ " .. self.Key .. " ]"
+	if self.BindConnection then
+		self.BindConnection:Disconnect()
+	end
+	if self.Section.Window.input[self.Key] then
+		self.BindConnection = self.Section.Window.input[self.Key]["keyupevent"]:Connect(function()
+			self.Enabled = not self.Enabled
+		end)
+	else
+		print("invalid key")
+	end
+
+	return self
+end]]
+
+function Section:TextBox(Options, Callback)
+	if not Options then
+		Options = {}
+	end
+
+	local TextBox = setmetatable({}, TextBox)
+	TextBox.Section = self
+	TextBox.WidgetType = WidgetType.TextBox
+
+	TextBox.Title = Options["Title"] or "No title"
+	TextBox.MaxCharacters = Options["MaxCharacters"] or 100
+	TextBox.Placeholder = Options["Placeholder"] or ""
+	TextBox.Callback = Callback or function(Text) end
+
+	TextBox.Writing = false
+
+	local TextBoxBackground = Drawing.new("Square")
+	TextBoxBackground.Filled = true
+	TextBoxBackground.Color = TextBox.Section.Window.theme.Widgets.TextBox.cTextBoxBackground
+	TextBoxBackground.ZIndex = -14
+
+	local Border = Drawing.new("Square")
+	Border.Filled = false
+	Border.Color = TextBox.Section.Window.theme.Widgets.TextBox.cTextBoxBorder
+	Border.ZIndex = -13
+
+	local Placeholder = Drawing.new("Text")
+	Placeholder.Text = TextBox.Placeholder
+	Placeholder.Outline = true
+	Placeholder.Color = TextBox.Section.Window.theme.Text.cTextPlaceholder
+	Placeholder.ZIndex = -12
+
+	local Write = Drawing.new("Text")
+	Write.Text = ""
+	Write.Outline = true
+	Write.Color = TextBox.Section.Window.theme.Text.cText
+	Write.ZIndex = -11
+
+	TextBox.Section.Window.input.LMB["keydownevent"]:Connect(function()
+		if
+			TextBox.Section.Window.open
+			and Utility.IsHoveredOver(TextBoxBackground, Utility.GetAllSelectionDrawings(TextBox))
+			and not self.writing
+		then
+			TextBox.Writing = true
+			self.writing = true
+		elseif TextBox.Writing then
+			TextBox.Writing = false
+			self.writing = false
+			TextBox.Callback(Write.Text)
+			Write.Text = ""
+		end
+	end)
+
+	TextBox.Section.Window.input.BACKSPACE["keydownevent"]:Connect(function()
+		if not TextBox.Writing and not (#Write.Text > 0) then
+			return
+		end
+		Write.Text = string.sub(Write.Text, 1, #Write.Text - 1)
+	end)
+
+	TextBox.Section.Window.input.ENTER["keydownevent"]:Connect(function()
+		if not TextBox.Writing then
+			return
+		end
+		TextBox.Writing = false
+		self.writing = false
+		TextBox.Callback(Write.Text)
+		Write.Text = ""
+	end)
+
+	for Key, Values in TextBox.Section.Window.input do
+		if Values.code >= 0x30 and Values.code <= 0x5A then
+			Values["keydownevent"]:Connect(function()
+				if not TextBox.Writing or not (#Write.Text <= TextBox.MaxCharacters) then
+					return
+				end
+				Write.Text ..= (iskeypressed(TextBox.Section.Window.input.SHIFT.code) and Key) or string.lower(Key)
+			end)
+		end
+	end
+
+	TextBox.var = {
+		drawings = {
+			TextBoxBackground = TextBoxBackground,
+			Border = Border,
+			Write = Write,
+			Placeholder = Placeholder,
+		},
+	}
+
+	table.insert(TextBox.Section.var.widgets, TextBox)
+	return TextBox
+end
+function TextBox:Get()
+	return self.Write.Text
+end
+
+function Section:Slider(Options, Callback)
+	if not Options then
+		Options = {}
+	end
+
+	local Slider = setmetatable({}, Slider)
+	Slider.Section = self
+	Slider.WidgetType = WidgetType.Slider
+
+	Slider.Title = Options["Title"] or "No title"
+	Slider.Suffix = Options["Suffix"] or ""
+	Slider.Min = Options["Min"] or 0
+	Slider.Max = Options["Max"] or 0
+	Slider.Value = math.clamp(Options["Default"], Slider.Min, Slider.Max) or 0
+	Slider.Step = Options["Step"] or 1
+	Slider.Callback = Callback or function(Value) end
+
+	Slider.sliding = false
+
+	local SliderBackground = Drawing.new("Square")
+	SliderBackground.Filled = true
+	SliderBackground.Color = Slider.Section.Window.theme.Widgets.Slider.cSliderBackground
+	SliderBackground.ZIndex = -14
+
+	local SliderBackgroundActive = Drawing.new("Square")
+	SliderBackgroundActive.Filled = true
+	SliderBackgroundActive.Color = Slider.Section.Window.theme.Widgets.Slider.cSliderBackgroundActive
+	SliderBackgroundActive.ZIndex = -13
+
+	local Border = Drawing.new("Square")
+	Border.Filled = false
+	Border.Color = Slider.Section.Window.theme.Widgets.Slider.cSliderBorder
+	Border.ZIndex = -12
+
+	local Title = Drawing.new("Text")
+	Title.Text = Slider.Title
+	Title.Outline = true
+	Title.Color = Slider.Section.Window.theme.Text.cText
+	Title.ZIndex = -11
+
+	local ValueText = Drawing.new("Text")
+	ValueText.Text = "0/0"
+	ValueText.Outline = true
+	ValueText.Color = Slider.Section.Window.theme.Text.cText
+	ValueText.ZIndex = -11
+
+	Slider.Section.Window.input.LMB["keydownevent"]:Connect(function()
+		if
+			Slider.Section.Window.open
+			and Utility.IsHoveredOver(SliderBackground, Utility.GetAllSelectionDrawings(Slider))
+		then
+			Slider.sliding = true
+		end
+	end)
+
+	Slider.Section.Window.input.LMB["keyupevent"]:Connect(function()
+		Slider.sliding = false
+	end)
+
+	Slider.Section.Window.input.LMB["holdevent"]:Connect(function()
+		if not Slider.sliding then
+			return
+		end
+		local _oldSliderValue = Slider.Value
+		Slider.Value = math.clamp(
+			math.floor(
+				(
+					Slider.Min
+					+ (Slider.Max - Slider.Min)
+						* math.clamp(Mouse.X - SliderBackground.Position.X, 0, SliderBackground.Size.X)
+						/ SliderBackground.Size.X
+				)
+						/ Slider.Step
+					+ 0.5
+			) * Slider.Step,
+			Slider.Min,
+			Slider.Max
+		)
+
+		if Slider.Value ~= _oldSliderValue then
+			Slider.Callback(Slider.Value)
+		end
+	end)
+
+	Slider.var = {
+		drawings = {
+			SliderBackground = SliderBackground,
+			SliderBackgroundActive = SliderBackgroundActive,
+			Border = Border,
+			Title = Title,
+			ValueText = ValueText,
+		},
+	}
+
+	table.insert(Slider.Section.var.widgets, Slider)
+	return Slider
+end
+function Slider:Set(Value)
+	self.Value = math.clamp(Value, self.Min, self.Max)
+end
+function Slider:Get()
+	return self.Value
+end
+
+function Section:RangeSlider(Options, Callback)
+	if not Options then
+		Options = {}
+	end
+
+	local RangeSlider = setmetatable({}, RangeSlider)
+	RangeSlider.Section = self
+	RangeSlider.WidgetType = WidgetType.RangeSlider
+
+	RangeSlider.Title = Options["Title"] or "No title"
+	RangeSlider.Suffix = Options["Suffix"] or ""
+	RangeSlider.Min = Options["Min"] or 0
+	RangeSlider.Max = Options["Max"] or 0
+	RangeSlider.DefaultLow = Options["DefaultLow"] or 0
+	RangeSlider.DefaultHigh = Options["DefaultHigh"] or 0
+	RangeSlider.LowValue = math.clamp(Options["DefaultLow"], RangeSlider.Min, RangeSlider.Max) or 0
+	RangeSlider.HighValue = math.clamp(Options["DefaultHigh"], RangeSlider.Min, RangeSlider.Max) or 0
+	RangeSlider.Step = Options["Step"] or 1
+	RangeSlider.Callback = Callback or function(Low, High) end
+
+	RangeSlider.lowSliding = false
+	RangeSlider.highSliding = false
+
+	local RangeSliderBackground = Drawing.new("Square")
+	RangeSliderBackground.Filled = true
+	RangeSliderBackground.Color = RangeSlider.Section.Window.theme.Widgets.RangeSlider.cRangeSliderBackground
+	RangeSliderBackground.ZIndex = -14
+
+	local RangeSliderBackgroundActiveLow = Drawing.new("Square")
+	RangeSliderBackgroundActiveLow.Filled = true
+	RangeSliderBackgroundActiveLow.Color =
+		RangeSlider.Section.Window.theme.Widgets.RangeSlider.cRangeSliderBackgroundActiveLow
+	RangeSliderBackgroundActiveLow.ZIndex = -13
+
+	local RangeSliderBackgroundActiveHigh = Drawing.new("Square")
+	RangeSliderBackgroundActiveHigh.Filled = true
+	RangeSliderBackgroundActiveHigh.Color =
+		RangeSlider.Section.Window.theme.Widgets.RangeSlider.cRangeSliderBackgroundActiveHigh
+	RangeSliderBackgroundActiveHigh.ZIndex = -12
+
+	local Border = Drawing.new("Square")
+	Border.Filled = false
+	Border.Color = RangeSlider.Section.Window.theme.Widgets.RangeSlider.cRangeSliderBorder
+	Border.ZIndex = -11
+
+	local Title = Drawing.new("Text")
+	Title.Text = RangeSlider.Title
+	Title.Outline = true
+	Title.Color = RangeSlider.Section.Window.theme.Text.cText
+	Title.ZIndex = -10
+
+	local ValueText = Drawing.new("Text")
+	ValueText.Text = "0/0"
+	ValueText.Outline = true
+	ValueText.Color = RangeSlider.Section.Window.theme.Text.cText
+	ValueText.ZIndex = -9
+
+	RangeSlider.Section.Window.input.LMB["keydownevent"]:Connect(function()
+		local _lowDistance = Mouse.X - RangeSliderBackground.Position.X
+		local _highDistance = RangeSliderBackground.Position.X + RangeSliderBackground.Size.X - Mouse.X
+		if
+			RangeSlider.Section.Window.open
+			and Utility.IsHoveredOver(RangeSliderBackground, Utility.GetAllSelectionDrawings(RangeSlider))
+			and (
+				(_lowDistance < _highDistance)
+				or (
+					RangeSlider.Section.Window.open
+					and Utility.IsHoveredOver(
+						RangeSliderBackgroundActiveLow,
+						Utility.GetAllSelectionDrawings(RangeSlider)
+					)
+				)
+			)
+		then
+			RangeSlider.lowSliding = true
+		elseif
+			RangeSlider.Section.Window.open
+			and Utility.IsHoveredOver(RangeSliderBackground, Utility.GetAllSelectionDrawings(RangeSlider))
+			and (
+				(_highDistance < _lowDistance)
+				or (
+					RangeSlider.Section.Window.open
+					and Utility.IsHoveredOver(
+						RangeSliderBackgroundActiveHigh,
+						Utility.GetAllSelectionDrawings(RangeSlider)
+					)
+				)
+			)
+		then
+			RangeSlider.highSliding = true
+		end
+	end)
+
+	RangeSlider.Section.Window.input.LMB["keyupevent"]:Connect(function()
+		RangeSlider.lowSliding = false
+		RangeSlider.highSliding = false
+	end)
+
+	RangeSlider.Section.Window.input.LMB["holdevent"]:Connect(function()
+		if not RangeSlider.lowSliding and not RangeSlider.highSliding then
+			return
+		end
+
+		if RangeSlider.lowSliding then
+			local _oldSliderValue = RangeSlider.LowValue
+			RangeSlider.LowValue = math.clamp(
+				math.floor(
+					(
+						RangeSlider.Min
+						+ (RangeSlider.Max - RangeSlider.Min)
+							* math.clamp(Mouse.X - RangeSliderBackground.Position.X, 0, RangeSliderBackground.Size.X)
+							/ RangeSliderBackground.Size.X
+					)
+							/ RangeSlider.Step
+						+ 0.5
+				) * RangeSlider.Step,
+				RangeSlider.Min,
+				RangeSlider.HighValue
+			)
+
+			if RangeSlider.LowValue ~= _oldSliderValue then
+				RangeSlider.Callback(RangeSlider.LowValue, RangeSlider.HighValue)
+			end
+		elseif RangeSlider.highSliding then
+			local _oldSliderValue = RangeSlider.HighValue
+			RangeSlider.HighValue = math.clamp(
+				math.floor(
+					(
+						RangeSlider.Min
+						+ (RangeSlider.Max - RangeSlider.Min)
+							* math.clamp(Mouse.X - RangeSliderBackground.Position.X, 0, RangeSliderBackground.Size.X)
+							/ RangeSliderBackground.Size.X
+					)
+							/ RangeSlider.Step
+						+ 0.5
+				) * RangeSlider.Step,
+				RangeSlider.LowValue,
+				RangeSlider.Max
+			)
+
+			if RangeSlider.HighValue ~= _oldSliderValue then
+				RangeSlider.Callback(RangeSlider.LowValue, RangeSlider.HighValue)
+			end
+		end
+	end)
+
+	RangeSlider.var = {
+		drawings = {
+			RangeSliderBackground = RangeSliderBackground,
+			RangeSliderBackgroundActiveLow = RangeSliderBackgroundActiveLow,
+			RangeSliderBackgroundActiveHigh = RangeSliderBackgroundActiveHigh,
+			Border = Border,
+			Title = Title,
+			ValueText = ValueText,
+		},
+	}
+
+	table.insert(RangeSlider.Section.var.widgets, RangeSlider)
+	return RangeSlider
+end
+function RangeSlider:SetLow(Value)
+	self.LowValue = math.clamp(Value, self.Min, self.HighValue)
+end
+function RangeSlider:SetHigh(Value)
+	self.HighValue = math.clamp(Value, self.LowValue, self.Max)
+end
+function RangeSlider:GetLow()
+	return self.LowValue
+end
+function RangeSlider:GetHigh()
+	return self.HighValue
+end
+
+function Section:Selection(Options, Callback)
+	if not Options then
+		Options = {}
+	end
+
+	local Selection = setmetatable({}, Selection)
+	Selection.Section = self
+	Selection.WidgetType = WidgetType.Selection
+
+	Selection.Title = Options["Title"] or "No title"
+	Selection.Selections = Options["Options"] or { "Nothing provide" }
+	Selection.Selected = Options["Default"] or Selection.Selections
+	Selection.Callback = Callback or function(Selected) end
+
+	Selection.open = false
+
+	local SelectionButtonBackground = Drawing.new("Square")
+	SelectionButtonBackground.Filled = true
+	SelectionButtonBackground.Color = Selection.Section.Window.theme.Widgets.Selection.cSelectionBackground
+	SelectionButtonBackground.ZIndex = -14
+
+	local Border = Drawing.new("Square")
+	Border.Filled = false
+	Border.Color = Selection.Section.Window.theme.Widgets.Selection.cSelectionBorder
+	Border.ZIndex = -13
+	local Title = Drawing.new("Text")
+	Title.Text = Selection.Title
+	Title.Outline = true
+	Title.Color = Selection.Section.Window.theme.Text.cText
+	Title.ZIndex = -12
+
+	local ValueText = Drawing.new("Text")
+	ValueText.Text = ""
+	ValueText.Outline = true
+	ValueText.Color = Selection.Section.Window.theme.Text.cText
+	ValueText.ZIndex = -11
+
+	local Selections = {}
+	for _, selection in Selection.Selections do
+		local SelectionBackground = Drawing.new("Square")
+		SelectionBackground.Filled = true
+		SelectionBackground.Color = Selection.Section.Window.theme.Widgets.Selection.cSelection
+		SelectionBackground.ZIndex = -6
+
+		local Border = Drawing.new("Square")
+		Border.Filled = false
+		Border.Color = Selection.Section.Window.theme.Widgets.Selection.cSelectionBorder
+		Border.ZIndex = -5
+
+		local Title = Drawing.new("Text")
+		Title.Text = selection
+		Title.Outline = true
+		Title.Color = Selection.Section.Window.theme.Text.cText
+		Title.ZIndex = -4
+
+		Selection.Section.Window.input.LMB["keyupevent"]:Connect(function()
+			if Selection.Section.Window.open and Selection.open and Utility.IsHoveredOver(SelectionBackground) then
+				Selection.open = false
+				Selection.Selected = selection
+				Selection.Callback(selection)
+			end
+		end)
+
+		table.insert(Selections, {
+			SelectionBackground = SelectionBackground,
+			Border = Border,
+			Title = Title,
+		})
+	end
+
+	Selection.Section.Window.input.LMB["keyupevent"]:Connect(function()
+		if
+			Selection.Section.Window.open
+			and Utility.IsHoveredOver(SelectionButtonBackground, Utility.GetAllSelectionDrawings(Selection))
+		then
+			Selection.open = not Selection.open
+		end
+	end)
+
+	Selection.var = {
+		SelectionDrawings = Selections,
+		drawings = {
+			SelectionButtonBackground = SelectionButtonBackground,
+			Border = Border,
+			Title = Title,
+			ValueText = ValueText,
+		},
+	}
+
+	table.insert(Selection.Section.var.widgets, Selection)
+	return Selection
+end
+function Selection:Get()
+	return self.Selected
+end
+
+function Section:MultiSelection(Options, Callback)
+	if not Options then
+		Options = {}
+	end
+
+	local MultiSelection = setmetatable({}, MultiSelection)
+	MultiSelection.Section = self
+	MultiSelection.WidgetType = WidgetType.MultiSelection
+
+	MultiSelection.Title = Options["Title"] or "No title"
+	MultiSelection.Selections = Options["Options"] or { "Nothing provided" }
+	MultiSelection.Selected = Options["Default"] or MultiSelection.Selections
+	MultiSelection.Callback = Callback or function(Selected) end
+
+	MultiSelection.open = false
+
+	local MultiSelectionButtonBackground = Drawing.new("Square")
+	MultiSelectionButtonBackground.Filled = true
+	MultiSelectionButtonBackground.Color =
+		MultiSelection.Section.Window.theme.Widgets.MultiSelection.cMultiSelectionBackground
+	MultiSelectionButtonBackground.ZIndex = -14
+
+	local Border = Drawing.new("Square")
+	Border.Filled = false
+	Border.Color = MultiSelection.Section.Window.theme.Widgets.MultiSelection.cMultiSelectionBorder
+	Border.ZIndex = -13
+
+	local Title = Drawing.new("Text")
+	Title.Text = MultiSelection.Title
+	Title.Outline = true
+	Title.Color = MultiSelection.Section.Window.theme.Text.cText
+	Title.ZIndex = -12
+
+	local ValueText = Drawing.new("Text")
+	ValueText.Text = ""
+	ValueText.Outline = true
+	ValueText.Color = MultiSelection.Section.Window.theme.Text.cText
+	ValueText.ZIndex = -11
+
+	local MultiSelections = {}
+	for _, selection in MultiSelection.Selections do
+		local MultiSelectionBackground = Drawing.new("Square")
+		MultiSelectionBackground.Filled = true
+		MultiSelectionBackground.Color = MultiSelection.Section.Window.theme.Widgets.MultiSelection.cMultiSelection
+		MultiSelectionBackground.ZIndex = -6
+
+		local Border = Drawing.new("Square")
+		Border.Filled = false
+		Border.Color = MultiSelection.Section.Window.theme.Widgets.MultiSelection.cMultiSelectionBorder
+		Border.ZIndex = -5
+
+		local Title = Drawing.new("Text")
+		Title.Text = selection
+		Title.Outline = true
+		Title.Color = MultiSelection.Section.Window.theme.Text.cText
+		Title.ZIndex = -4
+
+		MultiSelection.Section.Window.input.LMB["keyupevent"]:Connect(function()
+			if
+				MultiSelection.Section.Window.open
+				and MultiSelection.open
+				and Utility.IsHoveredOver(MultiSelectionBackground)
+			then
+				print(MultiSelection.Selected[1])
+				if table.find(MultiSelection.Selected, selection) then
+					table.remove(MultiSelection.Selected, table.find(MultiSelection.Selected, selection))
+				else
+					table.insert(MultiSelection.Selected, selection)
+				end
+				MultiSelection.Callback(MultiSelection.Selected)
+			end
+		end)
+
+		table.insert(MultiSelections, {
+			MultiSelectionBackground = MultiSelectionBackground,
+			Border = Border,
+			Title = Title,
+		})
+	end
+
+	MultiSelection.Section.Window.input.LMB["keyupevent"]:Connect(function()
+		if
+			MultiSelection.Section.Window.open
+			and Utility.IsHoveredOver(MultiSelectionButtonBackground, Utility.GetAllSelectionDrawings(MultiSelection))
+		then
+			MultiSelection.open = not MultiSelection.open
+		end
+	end)
+
+	MultiSelection.var = {
+		SelectionDrawings = MultiSelections,
+		drawings = {
+			MultiSelectionButtonBackground = MultiSelectionButtonBackground,
+			Border = Border,
+			Title = Title,
+			ValueText = ValueText,
+		},
+	}
+
+	table.insert(MultiSelection.Section.var.widgets, MultiSelection)
+	return MultiSelection
+end
+
+function Section:Colorpicker(Options, Callback)
+	--[[local Colorpicker = setmetatable({}, Colorpicker)
+	Colorpicker.Section = self
+	Colorpicker.WidgetType = WidgetType.Colorpicker
+
+	Colorpicker.Title = Options["Title"] or "No title"
+	Colorpicker.Color = Options["Color"] or Color3.fromRGB(255, 0, 0)
+	Colorpicker.Callback = Callback or function(RGB) end
+
+	Colorpicker.open = false
+
+	local ColorPreview = Drawing.new("Square")
+	ColorPreview.Filled = true
+	ColorPreview.Color = Colorpicker.Color
+	ColorPreview.ZIndex = -14
+
+	local Title = Drawing.new("Text")
+	Title.Text = Colorpicker.Title
+	Title.Outline = true
+	Title.Color = Colorpicker.Section.Window.theme.Text.cText
+	Title.ZIndex = -13
+
+	local ColorpickerBackground = Drawing.new("Square")
+	ColorpickerBackground.Filled = true
+	ColorpickerBackground.Color = Colorpicker.Section.Window.theme.Widgets.Colorpicker.cColorpickerBackground
+	ColorpickerBackground.ZIndex = -12
+
+	local Border = Drawing.new("Square")
+	Border.Filled = false
+	Border.Color = Colorpicker.Section.Window.theme.Widgets.Colorpicker.cColorpickerBorder
+	Border.ZIndex = -11
+
+	local localSettings = {
+		BrightnessSize = 256,
+		BrightnessPixels = 64,
+	}
+
+	local pixelDrawings = {}
+	local SB_SIZE = localSettings.BrightnessSize
+	local SB_PIXELS = localSettings.BrightnessPixels
+
+	for y = 0, SB_PIXELS - 1 do
+		for x = 0, SB_PIXELS - 1 do
+			local _pixel = Drawing.new("Square")
+			_pixel.Size = Vector2.new(SB_SIZE / SB_PIXELS, SB_SIZE / SB_PIXELS)
+			_pixel.Filled = true
+			_pixel.Visible = false
+			_pixel.ZIndex = -1
+			table.insert(pixelDrawings, _pixel)
+		end
+	end
+
+	Colorpicker.Section.Window.input.LMB["keyupevent"]:Connect(function()
+		if
+			Colorpicker.Section.Window.open
+			and Utility.IsHoveredOver(ColorPreview, Utility.GetAllSelectionDrawings(Colorpicker))
+		then
+			Colorpicker.open = not Colorpicker.open
+		end
+	end)
+
+	Colorpicker.var = {
+		localSettings = localSettings,
+		pixelDrawings = pixelDrawings,
+		drawings = {
+			ColorPreview = ColorPreview,
+			Title = Title,
+			ColorpickerBackground = ColorpickerBackground,
+			Border = Border,
+		},
+	}
+
+	table.insert(Colorpicker.Section.var.widgets, Colorpicker)
+	return Colorpicker]]
+end
+
+function Window:InputUpdate()
+	for _, key in pairs(self.input) do
+		local pressed = iskeypressed(key.code)
+
+		if pressed then
+			key.held = true
+			key.holdevent:Fire()
+			if not key.click then
+				key.keydownevent:Fire()
+				key.click = true
+			end
+		else
+			if key.click then
+				key.keyupevent:Fire()
+			end
+			key.held = false
+			key.click = false
+		end
+	end
+end
+
+function Window:Update() -- lol
+	Utility.ShowDrawings(self.window.var.drawings, self.open)
+	for _, tab in self.window.var.tabs do
+		Utility.ShowDrawings(tab.var.drawings, self.open)
+		for _, section in tab.var.sections do
+			Utility.ShowDrawings(section.var.drawings, self.open and self.activetab == tab)
+			for _, widget in section.var.widgets do
+				if widget.WidgetType == WidgetType.Selection or widget.WidgetType == WidgetType.MultiSelection then
+					Utility.ShowDrawings(widget.var.drawings, self.open and self.activetab == tab)
+					for _, drawings in widget.var.SelectionDrawings do
+						Utility.ShowDrawings(drawings, self.open and self.activetab == tab and widget.open)
+					end
+				elseif widget.WidgetType == WidgetType.Colorpicker then
+					Utility.ShowDrawings(widget.var.pixelDrawings, self.open and self.activetab == tab and widget.open)
+					Utility.ShowDrawings(widget.var.drawings, self.open and self.activetab == tab)
+					widget.var.drawings.ColorpickerBackground.Visible = self.open
+						and self.activetab == tab
+						and widget.open
+				else
+					Utility.ShowDrawings(widget.var.drawings, self.open and self.activetab == tab)
+				end
+			end
+		end
+	end
+
+	if not self.open then
+		return
+	end
+
+	local ViewportSize = Workspace.CurrentCamera.ViewportSize
+	local SizeOffset = Vector2.new(ViewportSize.X / 1920, ViewportSize.Y / 1080)
+
+	if not self.window.AutoScale then
+		SizeOffset = Vector2.new(1, 1)
+	end
+
+	local TabOffsetX = self.theme.Tab.Offset * SizeOffset.X
+	local SectionOffsetY = self.theme.Section.Offset * SizeOffset.Y
+
+	local Drawings = self.window.var.drawings
+
+	if not self.dragoffset then
+		self.dragoffset = (
+			ViewportSize / 2 - Vector2.new(self.window.Size.X * SizeOffset.X, self.window.Size.Y * SizeOffset.Y) / 2
+		)
+	end
+
+	Drawings.Background.Size = Vector2.new(self.window.Size.X * SizeOffset.X, self.window.Size.Y * SizeOffset.Y)
+	Drawings.Background.Position = Vector2.new(self.dragoffset.X, self.dragoffset.Y)
+
+	Drawings.Border.Size = Drawings.Background.Size - Vector2.new(2, 2)
+	Drawings.Border.Position = Drawings.Background.Position + Vector2.new(1, 1)
+
+	Drawings.TopBar.Size = Vector2.new(Drawings.Background.Size.X, 25 * SizeOffset.Y)
+	Drawings.TopBar.Position = Drawings.Background.Position
+
+	Drawings.Title.Position = Drawings.Background.Position
+		+ Vector2.new(4, Utility.GetTextBounds(Drawings.Title.Text).Y * SizeOffset.Y)
+
+	for index, tab in self.window.var.tabs do
+		local selected = self.activetab == tab
+
+		tab.var.drawings.TabBackground.Size =
+			Vector2.new(Drawings.TopBar.Size.X / #self.window.var.tabs, Drawings.TopBar.Size.Y)
+		tab.var.drawings.TabBackground.Position = Vector2.new(
+			Drawings.TopBar.Position.X + tab.var.drawings.TabBackground.Size.X * (index - 1),
+			Drawings.TopBar.Position.Y + Drawings.TopBar.Size.Y
+		)
+
+		tab.var.drawings.Border.Size = tab.var.drawings.TabBackground.Size - Vector2.new(2, 2)
+		tab.var.drawings.Border.Position = tab.var.drawings.TabBackground.Position + Vector2.new(1, 1)
+
+		tab.var.drawings.Title.Position = tab.var.drawings.TabBackground.Position
+			+ Vector2.new(
+				TabOffsetX / 2 + 4 * SizeOffset.X,
+				Utility.GetTextBounds(tab.var.drawings.Title.Text).Y * SizeOffset.Y
+			)
+
+		tab.var.drawings.TabBackground.Color = (selected and self.theme.Tab.cTabSelectedBackground)
+			or self.theme.Tab.cTabUnselectedBackground
+		tab.var.drawings.Border.Color = (selected and self.theme.Tab.cTabBorderSelected) or self.theme.Tab.cTabBorder
+
+		if not selected then
+			for _, section in tab.var.sections do
+				Utility.ShowDrawings(section.var.drawings, false)
+				for _, widget in section.var.widgets do
+					Utility.ShowDrawings(widget.var.drawings, false)
+					if widget.WidgetType == WidgetType.Selection or widget.WidgetType == WidgetType.MultiSelection then
+						for _, drawings in widget.var.SelectionDrawings do
+							Utility.ShowDrawings(drawings, false)
+						end
+					elseif widget.WidgetType == WidgetType.Colorpicker then
+						Utility.ShowDrawings(widget.var.pixelDrawings, false)
+					end
+				end
+			end
+		end
+
+		local _otherSectionsOffsetL = 0
+		local _otherSectionsOffsetR = 0
+		for index, section in self.activetab.var.sections do
+			local _sideAddition = section.Side == "Right" and Drawings.Background.Size.X / 2 or 0
+			local _sizeOffset = TabOffsetX * (section.Side == "Right" and 2 or 1)
+
+			local _toAddY = (section.Side == "Left" and _otherSectionsOffsetL)
+				or (section.Side == "Right" and _otherSectionsOffsetR)
+				or 0
+
+			local _sectionPosition = Vector2.new(
+				Drawings.TopBar.Position.X,
+				Drawings.TopBar.Position.Y
+					+ Drawings.TopBar.Size.Y
+					+ tab.var.drawings.TabBackground.Size.Y
+					+ SectionOffsetY
+			) + Vector2.new(TabOffsetX + _sideAddition, SectionOffsetY + _toAddY)
+
+			local _originalSize = section.var.drawings.SectionBackground.Size
+			local _offset = 15
+			for _, widget in section.var.widgets do
+				local wType = widget.WidgetType
+				if wType == WidgetType.Seperator then
+					widget.var.drawings.Line.Size =
+						Vector2.new(section.var.drawings.SectionBackground.Size.X - 8, 2 * SizeOffset.Y)
+					widget.var.drawings.Line.Position = _sectionPosition
+						+ Vector2.new(4, _originalSize.Y / 2 + _offset)
+						- Vector2.new(0, section.var.drawings.SectionBackground.Size.Y / 2)
+
+					widget.var.drawings.Title.Position = widget.var.drawings.Line.Position
+						+ Vector2.new(
+							widget.var.drawings.Line.Size.X / 2
+								- Utility.GetTextBounds(widget.var.drawings.Title.Text).X / 2,
+							-1 - Utility.GetTextBounds(widget.var.drawings.Title.Text).Y / 2
+						)
+
+					_offset += widget.var.drawings.Line.Size.Y * 7.5
+				elseif wType == WidgetType.Button then
+					widget.var.drawings.ButtonBackground.Size =
+						Vector2.new(section.var.drawings.SectionBackground.Size.X - 8, 20 * SizeOffset.Y)
+					widget.var.drawings.ButtonBackground.Position = _sectionPosition
+						+ Vector2.new(4, _originalSize.Y / 2 + _offset)
+						- Vector2.new(0, section.var.drawings.SectionBackground.Size.Y / 2)
+
+					widget.var.drawings.Border.Size = widget.var.drawings.ButtonBackground.Size - Vector2.new(2, 2)
+					widget.var.drawings.Border.Position = widget.var.drawings.ButtonBackground.Position
+						+ Vector2.new(1, 1)
+
+					widget.var.drawings.Title.Position = widget.var.drawings.ButtonBackground.Position
+						+ Vector2.new(
+							widget.var.drawings.ButtonBackground.Size.X / 2
+								- Utility.GetTextBounds(widget.var.drawings.Title.Text).X / 2,
+							Utility.GetTextBounds(widget.var.drawings.Title.Text).Y / 2
+						)
+
+					_offset += widget.var.drawings.ButtonBackground.Size.Y + 10
+				elseif wType == WidgetType.Checkbox then
+					local _checkboxscale = math.min(SizeOffset.X, SizeOffset.Y)
+					widget.var.drawings.CheckboxBackground.Size = Vector2.new(18, 18) * _checkboxscale
+					widget.var.drawings.CheckboxBackground.Position = _sectionPosition
+						+ Vector2.new(4, _originalSize.Y / 2 + _offset)
+						- Vector2.new(0, section.var.drawings.SectionBackground.Size.Y / 2)
+
+					widget.var.drawings.Border.Size = widget.var.drawings.CheckboxBackground.Size - Vector2.new(2, 2)
+					widget.var.drawings.Border.Position = widget.var.drawings.CheckboxBackground.Position
+						+ Vector2.new(1, 1)
+
+					widget.var.drawings.Title.Position = widget.var.drawings.CheckboxBackground.Position
+						+ Vector2.new(
+							(6 * SizeOffset.X) + widget.var.drawings.CheckboxBackground.Size.X + 1,
+							(Utility.GetTextBounds(widget.var.drawings.Title.Text).Y / 2) * SizeOffset.Y
+						)
+
+					--[[widget.var.drawings.KeybindText.Visible = self.Key ~= nil
+					widget.var.drawings.KeybindText.Position = widget.var.drawings.CheckboxBackground.Position
+						+ Vector2.new(
+							section.var.drawings.SectionBackground.Size.X
+								+ -Utility.GetTextBounds(widget.var.drawings.KeybindText.Text).X
+								- (6 * SizeOffset.X)
+								- widget.var.drawings.CheckboxBackground.Size.X
+								- 1,
+							(Utility.GetTextBounds(widget.var.drawings.Title.Text).Y / 2) * SizeOffset.Y
+						)--]]
+
+					widget.var.drawings.CheckboxBackground.Color = (
+						widget.Enabled and section.Window.theme.Widgets.Checkbox.cCheckboxChecked
+					) or section.Window.theme.Widgets.Checkbox.cCheckboxUnchecked
+
+					_offset += widget.var.drawings.CheckboxBackground.Size.X + 8
+				elseif wType == WidgetType.TextBox then
+					widget.var.drawings.TextBoxBackground.Size =
+						Vector2.new(section.var.drawings.SectionBackground.Size.X - 8, 20 * SizeOffset.Y)
+					widget.var.drawings.TextBoxBackground.Position = _sectionPosition
+						+ Vector2.new(4, _originalSize.Y / 2 + _offset)
+						- Vector2.new(0, section.var.drawings.SectionBackground.Size.Y / 2)
+
+					widget.var.drawings.Border.Size = widget.var.drawings.TextBoxBackground.Size - Vector2.new(2, 2)
+					widget.var.drawings.Border.Position = widget.var.drawings.TextBoxBackground.Position
+						+ Vector2.new(1, 1)
+
+					widget.var.drawings.Write.Position = widget.var.drawings.TextBoxBackground.Position
+						+ Vector2.new(
+							3,
+							(
+								-1
+								+ widget.var.drawings.TextBoxBackground.Size.Y / 2
+								- Utility.GetTextBounds(widget.var.drawings.Placeholder.Text).Y / 2
+							)
+						)
+
+					widget.var.drawings.Placeholder.Position = widget.var.drawings.TextBoxBackground.Position
+						+ Vector2.new(
+							3,
+							(
+								-1
+								+ widget.var.drawings.TextBoxBackground.Size.Y / 2
+								- Utility.GetTextBounds(widget.var.drawings.Placeholder.Text).Y / 2
+							)
+						)
+
+					widget.var.drawings.Placeholder.Outline = (#widget.var.drawings.Write.Text == 0 and true) or false
+					widget.var.drawings.Placeholder.Color = (
+						#widget.var.drawings.Write.Text == 0
+						and widget.Section.Window.theme.Text.cTextPlaceholder
+					)
+						or widget.Section.Window.theme.Widgets.TextBox.cTextBoxBackground -- too lazy to fix a simple bug, fast hacky fix lol
+
+					_offset += widget.var.drawings.TextBoxBackground.Size.Y + 10
+				elseif wType == WidgetType.Slider then
+					widget.var.drawings.Title.Position = _sectionPosition
+						+ Vector2.new(6, _originalSize.Y / 2 + _offset)
+						- Vector2.new(0, section.var.drawings.SectionBackground.Size.Y / 2)
+					_offset += 12
+					if #widget.var.drawings.Title.Text == 0 then
+						_offset -= 12
+					end
+					widget.var.drawings.SliderBackground.Size =
+						Vector2.new(section.var.drawings.SectionBackground.Size.X - 8, 20 * SizeOffset.Y)
+					widget.var.drawings.SliderBackground.Position = _sectionPosition
+						+ Vector2.new(4, _originalSize.Y / 2 + _offset)
+						- Vector2.new(0, section.var.drawings.SectionBackground.Size.Y / 2)
+
+					widget.var.drawings.Border.Size = widget.var.drawings.SliderBackground.Size - Vector2.new(2, 2)
+					widget.var.drawings.Border.Position = widget.var.drawings.SliderBackground.Position
+						+ Vector2.new(1, 1)
+
+					local _sizeActiveDiffer = ((widget.Value - widget.Min) / (widget.Max - widget.Min))
+
+					widget.var.drawings.SliderBackgroundActive.Size = Vector2.new(
+						widget.var.drawings.SliderBackground.Size.X * _sizeActiveDiffer,
+						widget.var.drawings.SliderBackground.Size.Y
+					) - Vector2.new(2, 2)
+					widget.var.drawings.SliderBackgroundActive.Position = widget.var.drawings.SliderBackground.Position
+						+ Vector2.new(1, 1)
+
+					widget.var.drawings.ValueText.Position = widget.var.drawings.SliderBackground.Position
+						+ Vector2.new(
+							widget.var.drawings.SliderBackground.Size.X / 2
+								- Utility.GetTextBounds(widget.var.drawings.ValueText.Text).X / 2,
+							Utility.GetTextBounds(widget.var.drawings.ValueText.Text).Y / 2
+						)
+					widget.var.drawings.ValueText.Text = widget.Value
+						.. widget.Suffix
+						.. "/"
+						.. widget.Max
+						.. widget.Suffix
+
+					_offset += widget.var.drawings.SliderBackground.Size.Y + 10
+				elseif wType == WidgetType.RangeSlider then
+					widget.var.drawings.Title.Position = _sectionPosition
+						+ Vector2.new(6, _originalSize.Y / 2 + _offset)
+						- Vector2.new(0, section.var.drawings.SectionBackground.Size.Y / 2)
+					_offset += 12
+					if #widget.var.drawings.Title.Text == 0 then
+						_offset -= 12
+					end
+					widget.var.drawings.RangeSliderBackground.Size =
+						Vector2.new(section.var.drawings.SectionBackground.Size.X - 8, 20 * SizeOffset.Y)
+					widget.var.drawings.RangeSliderBackground.Position = _sectionPosition
+						+ Vector2.new(4, _originalSize.Y / 2 + _offset)
+						- Vector2.new(0, section.var.drawings.SectionBackground.Size.Y / 2)
+
+					widget.var.drawings.Border.Size = widget.var.drawings.RangeSliderBackground.Size - Vector2.new(2, 2)
+					widget.var.drawings.Border.Position = widget.var.drawings.RangeSliderBackground.Position
+						+ Vector2.new(1, 1)
+
+					local _sizeActiveDifferLow = (widget.LowValue - widget.Min) / (widget.Max - widget.Min)
+					local _sizeActiveDifferHigh = (widget.Max - widget.HighValue) / (widget.Max - widget.Min)
+
+					widget.var.drawings.RangeSliderBackgroundActiveLow.Size = Vector2.new(
+						widget.var.drawings.RangeSliderBackground.Size.X * _sizeActiveDifferLow,
+						widget.var.drawings.RangeSliderBackground.Size.Y
+					) - Vector2.new(2, 2)
+					widget.var.drawings.RangeSliderBackgroundActiveLow.Position = widget.var.drawings.RangeSliderBackground.Position
+						+ Vector2.new(1, 1)
+
+					widget.var.drawings.RangeSliderBackgroundActiveHigh.Size = Vector2.new(
+						widget.var.drawings.RangeSliderBackground.Size.X * _sizeActiveDifferHigh,
+						widget.var.drawings.RangeSliderBackground.Size.Y
+					) - Vector2.new(2, 2)
+					widget.var.drawings.RangeSliderBackgroundActiveHigh.Position = widget.var.drawings.RangeSliderBackground.Position
+						+ Vector2.new(
+							-1
+								+ widget.var.drawings.RangeSliderBackground.Size.X
+								- widget.var.drawings.RangeSliderBackgroundActiveHigh.Size.X,
+							1
+						)
+
+					widget.var.drawings.ValueText.Position = widget.var.drawings.RangeSliderBackground.Position
+						+ Vector2.new(
+							widget.var.drawings.RangeSliderBackground.Size.X / 2
+								- Utility.GetTextBounds(widget.var.drawings.ValueText.Text).X / 2,
+							Utility.GetTextBounds(widget.var.drawings.ValueText.Text).Y / 2
+						)
+					widget.var.drawings.ValueText.Text = widget.LowValue
+						.. widget.Suffix
+						.. " - "
+						.. widget.HighValue
+						.. widget.Suffix
+
+					_offset += widget.var.drawings.RangeSliderBackground.Size.Y + 10
+				elseif wType == WidgetType.Selection then
+					widget.var.drawings.Title.Position = _sectionPosition
+						+ Vector2.new(6, _originalSize.Y / 2 + _offset)
+						- Vector2.new(0, section.var.drawings.SectionBackground.Size.Y / 2)
+					_offset += 12
+					if #widget.var.drawings.Title.Text == 0 then
+						_offset -= 12
+					end
+					widget.var.drawings.SelectionButtonBackground.Size =
+						Vector2.new(section.var.drawings.SectionBackground.Size.X - 8, 25 * SizeOffset.Y)
+					widget.var.drawings.SelectionButtonBackground.Position = _sectionPosition
+						+ Vector2.new(4, _originalSize.Y / 2 + _offset)
+						- Vector2.new(0, section.var.drawings.SectionBackground.Size.Y / 2)
+
+					widget.var.drawings.Border.Size = widget.var.drawings.SelectionButtonBackground.Size
+						- Vector2.new(2, 2)
+					widget.var.drawings.Border.Position = widget.var.drawings.SelectionButtonBackground.Position
+						+ Vector2.new(1, 1)
+
+					widget.var.drawings.ValueText.Position = widget.var.drawings.SelectionButtonBackground.Position
+						+ Vector2.new(5, 1 + Utility.GetTextBounds(widget.var.drawings.ValueText.Text).Y / 2)
+
+					widget.var.drawings.ValueText.Text = widget.Selected
+
+					for index, drawings in widget.var.SelectionDrawings do
+						for _, drawing in drawings do
+							drawing.Visible = self.open and widget.open
+						end
+						if not widget.open then
+							continue
+						end
+						if widget.Selected == drawings.Title.Text then
+							drawings.SelectionBackground.Color =
+								section.Window.theme.Widgets.Selection.cSelectionSelected
+						else
+							drawings.SelectionBackground.Color = section.Window.theme.Widgets.Selection.cSelection
+						end
+
+						local _selectionOffset = (25 * SizeOffset.Y) * index - (25 * SizeOffset.Y)
+						drawings.SelectionBackground.Size = Vector2.new(
+							section.var.drawings.SectionBackground.Size.X - 8,
+							25 * SizeOffset.Y
+						) - Vector2.new(1, 0)
+						drawings.SelectionBackground.Position = _sectionPosition
+							+ Vector2.new(
+								4,
+								_originalSize.Y / 2
+									+ _offset
+									+ widget.var.drawings.SelectionButtonBackground.Size.Y
+									+ _selectionOffset
+							)
+							- Vector2.new(0, section.var.drawings.SectionBackground.Size.Y / 2)
+
+						drawings.Title.Position = drawings.SelectionBackground.Position
+							+ Vector2.new(5, 1 + Utility.GetTextBounds(drawings.Title.Text).Y / 2)
+
+						drawings.Border.Size = Vector2.new(
+							-2 + drawings.SelectionBackground.Size.X,
+							-2 + drawings.SelectionBackground.Size.Y
+						)
+						drawings.Border.Position = drawings.SelectionBackground.Position
+							+ Vector2.new(1, 1 + drawings.Border.Size.Y / 2 - drawings.SelectionBackground.Size.Y / 2)
+					end
+					_offset += widget.var.drawings.SelectionButtonBackground.Size.Y + 10
+				elseif wType == WidgetType.MultiSelection then
+					widget.var.drawings.Title.Position = _sectionPosition
+						+ Vector2.new(6, _originalSize.Y / 2 + _offset)
+						- Vector2.new(0, section.var.drawings.SectionBackground.Size.Y / 2)
+					_offset += 12
+					if #widget.var.drawings.Title.Text == 0 then
+						_offset -= 12
+					end
+					widget.var.drawings.MultiSelectionButtonBackground.Size =
+						Vector2.new(section.var.drawings.SectionBackground.Size.X - 8, 25 * SizeOffset.Y)
+					widget.var.drawings.MultiSelectionButtonBackground.Position = _sectionPosition
+						+ Vector2.new(4, _originalSize.Y / 2 + _offset)
+						- Vector2.new(0, section.var.drawings.SectionBackground.Size.Y / 2)
+
+					widget.var.drawings.Border.Size = widget.var.drawings.MultiSelectionButtonBackground.Size
+						- Vector2.new(2, 2)
+					widget.var.drawings.Border.Position = widget.var.drawings.MultiSelectionButtonBackground.Position
+						+ Vector2.new(1, 1)
+
+					widget.var.drawings.ValueText.Position = widget.var.drawings.MultiSelectionButtonBackground.Position
+						+ Vector2.new(5, 1 + Utility.GetTextBounds(widget.var.drawings.ValueText.Text).Y / 2)
+
+					table.sort(widget.Selected)
+					local _selected = ""
+					_selected = table.concat(widget.Selected, ", ")
+
+					widget.var.drawings.ValueText.Text = _selected
+
+					for index, drawings in widget.var.SelectionDrawings do
+						for _, drawing in drawings do
+							drawing.Visible = self.open and widget.open
+						end
+						if not widget.open then
+							continue
+						end
+						if table.find(widget.Selected, drawings.Title.Text) then
+							drawings.MultiSelectionBackground.Color =
+								section.Window.theme.Widgets.MultiSelection.cMultiSelectionSelected
+						else
+							drawings.MultiSelectionBackground.Color =
+								section.Window.theme.Widgets.MultiSelection.cMultiSelection
+						end
+						local _selectionOffset = (25 * SizeOffset.Y) * index - (25 * SizeOffset.Y)
+						drawings.MultiSelectionBackground.Size = Vector2.new(
+							section.var.drawings.SectionBackground.Size.X - 8,
+							25 * SizeOffset.Y
+						) - Vector2.new(1, 0)
+						drawings.MultiSelectionBackground.Position = _sectionPosition
+							+ Vector2.new(
+								4,
+								_originalSize.Y / 2
+									+ _offset
+									+ widget.var.drawings.MultiSelectionButtonBackground.Size.Y
+									+ _selectionOffset
+							)
+							- Vector2.new(0, section.var.drawings.SectionBackground.Size.Y / 2)
+
+						drawings.Title.Position = drawings.MultiSelectionBackground.Position
+							+ Vector2.new(5, 1 + Utility.GetTextBounds(drawings.Title.Text).Y / 2)
+
+						drawings.Border.Size = Vector2.new(
+							-2 + drawings.MultiSelectionBackground.Size.X,
+							-2 + drawings.MultiSelectionBackground.Size.Y
+						)
+						drawings.Border.Position = drawings.MultiSelectionBackground.Position
+							+ Vector2.new(
+								1,
+								1 + drawings.Border.Size.Y / 2 - drawings.MultiSelectionBackground.Size.Y / 2
+							)
+					end
+					_offset += widget.var.drawings.MultiSelectionButtonBackground.Size.Y + 10
+				elseif wType == WidgetType.Colorpicker then
+					widget.var.drawings.Title.Position = _sectionPosition
+						+ Vector2.new(6, _originalSize.Y / 2 + _offset)
+						- Vector2.new(0, section.var.drawings.SectionBackground.Size.Y / 2)
+					widget.var.drawings.ColorPreview.Size = Vector2.new(40 * SizeOffset.X, 15 * SizeOffset.Y)
+					widget.var.drawings.ColorPreview.Position = _sectionPosition
+						+ Vector2.new(
+							-5 - widget.var.drawings.ColorPreview.Size.X + section.var.drawings.SectionBackground.Size.X,
+							_offset
+						)
+					widget.var.drawings.ColorPreview.Color = widget.Color
+					_offset += 12
+
+					if widget.open then
+						widget.var.drawings.ColorpickerBackground.Size = Vector2.new(0, 0)
+						widget.var.drawings.ColorpickerBackground.Position = _sectionPosition + Vector2.new(0, _offset)
+					end
+				end
+			end
+			_offset *= SizeOffset.Y
+
+			section.var.drawings.SectionBackground.Size = Vector2.new(Drawings.Background.Size.X / 2 - _sizeOffset, 20)
+				+ Vector2.new(0, _offset)
+			section.var.drawings.SectionBackground.Position = Vector2.new(
+				Drawings.TopBar.Position.X,
+				Drawings.TopBar.Position.Y
+					+ Drawings.TopBar.Size.Y
+					+ tab.var.drawings.TabBackground.Size.Y
+					+ SectionOffsetY
+			) + Vector2.new(TabOffsetX + _sideAddition, SectionOffsetY + _toAddY)
+
+			section.var.drawings.Border.Size = section.var.drawings.SectionBackground.Size - Vector2.new(2, 2)
+			section.var.drawings.Border.Position = section.var.drawings.SectionBackground.Position + Vector2.new(1, 1)
+
+			section.var.drawings.Title.Position = section.var.drawings.SectionBackground.Position
+				+ Vector2.new(
+					section.var.drawings.SectionBackground.Size.X / 2
+						- Utility.GetTextBounds(section.var.drawings.Title.Text).X / 2,
+					-Utility.GetTextBounds(section.var.drawings.Title.Text).Y / 2
+				)
+
+			if section.Side == "Left" then
+				_otherSectionsOffsetL += section.var.drawings.SectionBackground.Size.Y + 10
+			elseif section.Side == "Right" then
+				_otherSectionsOffsetR += section.var.drawings.SectionBackground.Size.Y + 10
+			end
+		end
+	end
+end
+
+function Window:Unload()
+	self.running = false
+end
+
+function Window:Initialize()
+	self.initialized = true
+	self.running = true
+
+	while true and self.running do
+		local s, e = pcall(function()
+			task.spawn(function()
+				self:InputUpdate()
+				self:Update()
+			end)
+		end)
+
+		if e then
+			error(e)
+			self.running = false
+		end
+		local _fps = 30
+		task.wait(1 / _fps)
+	end
+	for _, key in self.input do
+		key.holdevent:DisconnectAll()
+		key.keydownevent:DisconnectAll()
+		key.keyupevent:DisconnectAll()
+	end
+
+	Utility.RemoveDrawings(self.window.var.drawings)
+	for _, tab in self.window.var.tabs do
+		Utility.RemoveDrawings(tab.var.drawings)
+		for _, section in tab.var.sections do
+			Utility.RemoveDrawings(section.var.drawings)
+			for _, widget in section.var.widgets do
+				Utility.RemoveDrawings(widget.var.drawings)
+				if widget.WidgetType == WidgetType.Selection or widget.WidgetType == WidgetType.MultiSelection then
+					for _, drawings in widget.var.SelectionDrawings do
+						Utility.RemoveDrawings(drawings)
+					end
+				elseif widget.WidgetType == WidgetType.Colorpicker then
+					Utility.RemoveDrawings(widget.var.pixelDrawings)
+				end
+			end
+		end
+	end
+	setrobloxinput(true)
+end
+
+return UI
